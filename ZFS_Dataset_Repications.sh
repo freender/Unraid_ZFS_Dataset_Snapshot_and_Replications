@@ -11,14 +11,14 @@
 ####################
 #
 #Unraid notifications during process (sent to Unraid gui etc)
-notification_type="all"  # set to "all" for both success & failure, to "error"for only failure or "none" for no notices to be sent.
-notify_tune="yes"  # as well as a notifiction, if sucessful it will play the Mario "achievment tune" or failure StarWars imperial march tune on beep speaker!
+notification_type="error"  # set to "all" for both success & failure, to "error"for only failure or "none" for no notices to be sent.
+notify_tune="no"  # as well as a notifiction, if sucessful it will play the Mario "achievment tune" or failure StarWars imperial march tune on beep speaker!
                    # sometimes good to have an audiable notification!! Set to "no" for silence. (this function your server needs a beep speaker)
 #
 ####################
 # Source for snapshotting and/or replication
-source_pool="source_zfs_pool_name"  #this is the zpool in which your source dataset resides (note the does NOT start with /mnt/)
-source_dataset="dataset_name"   #this is the name of the dataset you want to snapshot and/or replicate
+source_pool="cache"  #this is the zpool in which your source dataset resides (note the does NOT start with /mnt/)
+source_dataset="appdata"   #this is the name of the dataset you want to snapshot and/or replicate
                                 #If using auto snapshots souce pool CAN NOT contain spaces. This is because sanoid config doesnt handle them
 source_dataset_auto_select="no"  # Set to "no" to snapshot and replicate only the specified source_dataset, "yes" to auto-select all datasets for these operations
 source_dataset_auto_select_exclude_prefix="backup_"	# Prefix to exclude certain datasets from auto-selection. Leave empty to disable exclusion
@@ -50,12 +50,12 @@ remote_server="10.10.20.197" #remote servers name or ip
 #
 ### replication settings
 #
-replication="zfs"   #this is set to the method for how you want to have the sourcedataset replicated - "zfs" , "rsync" or "none"
+replication="rsync"   #this is set to the method for how you want to have the sourcedataset replicated - "zfs" , "rsync" or "none"
 #
 ##########
 # zfs replication variables. You do NOT need these if replication set to "rsync" or "none"
-destination_pool="dest_zfs_pool_name"  #this is the zpool in which your destination dataset will be created
-parent_destination_dataset="dest_dataset_name" #this is the parent dataset in which a child dataset will be created containing the replicated data (zfs replication)
+destination_pool="disk1"  #this is the zpool in which your destination dataset will be created
+parent_destination_dataset="zfs_backup" #this is the parent dataset in which a child dataset will be created containing the replicated data (zfs replication)
 # For ZFS replication syncoid is used. The below variable sets some options for that.
 # "strict-mirror" Strict mirroring that both mirrors the source and repairs mismatches (uses --force-delete flag).This will delete snapshots in the destination which are not in the source.
 # "basic" Basic replication without any additional flags will not delete snapshots in destination if not in the source
@@ -64,9 +64,29 @@ syncoid_mode="strict-mirror"
 ##########
 #
 # rsync replication variables. You do not need these if replication set to zfs or no
-parent_destination_folder="/mnt/user/rsync_backup" # This is the parent directory in which a child directory will be created containing the replicated data (rsync)
-rsync_type="incremental" # set to "incremental" for dated incremental backups or "mirror" for mirrored backups
+parent_destination_folder="/mnt/user/backup/nas-docker" # This is the parent directory in which a child directory will be created containing the replicated data (rsync)
+rsync_type="mirror" # set to "incremental" for dated incremental backups or "mirror" for mirrored backups
 #
+
+# List of relative paths to exclude from rsync
+rsync_excludes=(
+    "qBittorrent/config/ipc-socket"
+    "logs/"
+    "MediaCover/"
+    "Library/Application Support/Plex Media Server/Metadata/"
+    "Library/Application Support/Plex Media Server/Plug-in Support/Caches/"
+    "Library/Application Support/Plex Media Server/Cache/"
+    "Library/Application Support/Plex Media Server/Media/"
+    "Library/Application Support/Plex Media Server/Logs/"
+    "Library/Application Support/Plex Media Server/Crash Reports/"
+    "cache/"
+    ".cache/"
+    "machine-learning/"
+    "log/"
+    "thumbs/"
+    "VueTorrent/.git/"
+    "tautulli/newsletters/"
+)
 ####################
 #
 # This function is to send messages to Unraid gui etc
@@ -380,6 +400,12 @@ get_previous_backup() {
 #
 rsync_replication() {
     local previous_backup  # declare variable 
+    
+    # Build --exclude options
+    local exclude_args=()
+    for path in "${rsync_excludes[@]}"; do
+        exclude_args+=(--exclude="$path")
+    done
 
     IFS=$'\n'
     if [ "$replication" = "rsync" ]; then
@@ -408,7 +434,7 @@ rsync_replication() {
                 # Rsync the snapshot to the remote destination with link-dest
                 #rsync -azvvv --delete $link_dest -e ssh "${snapshot_mount_point}/" "${remote_user}@${remote_server}:${rsync_destination}/"
                 echo "Executing remote rsync: rsync -azvh --delete $link_dest -e ssh \"${snapshot_mount_point}/\" \"${remote_user}@${remote_server}:${rsync_destination}/\""
-rsync -azvh --delete $link_dest -e ssh "${snapshot_mount_point}/" "${remote_user}@${remote_server}:${rsync_destination}/"
+rsync -azvh --delete "${exclude_args[@]}" $link_dest -e ssh "${snapshot_mount_point}/" "${remote_user}@${remote_server}:${rsync_destination}/"
 
                 if [ $? -ne 0 ]; then
                     unraid_notify "Rsync replication failed from source: ${source_path} to remote destination: ${remote_user}@${remote_server}:${rsync_destination}" "failure"
@@ -418,9 +444,11 @@ rsync -azvh --delete $link_dest -e ssh "${snapshot_mount_point}/" "${remote_user
                 # Ensure the backup directory exists
                 [ "$rsync_type" = "incremental" ] && mkdir -p "${rsync_destination}"
                 # Rsync the snapshot to the local destination with link-dest
-              #  rsync -avv --delete $link_dest "${snapshot_mount_point}/" "${rsync_destination}/"
-              echo "Executing local rsync: rsync -avh --delete $link_dest \"${snapshot_mount_point}/\" \"${rsync_destination}/\""
-rsync -avh --delete $link_dest "${snapshot_mount_point}/" "${rsync_destination}/"
+                #  rsync -avv --delete $link_dest "${snapshot_mount_point}/" "${rsync_destination}/"
+
+                # Rsync the snapshot to the local destination with link-dest and exclusions
+                echo "Executing local rsync: rsync -avh --delete ${exclude_args[*]} $link_dest \"${snapshot_mount_point}/\" \"${rsync_destination}/\""
+rsync -avh --delete "${exclude_args[@]}" $link_dest "${snapshot_mount_point}/" "${rsync_destination}/"
 
                 if [ $? -ne 0 ]; then
                     unraid_notify "Rsync replication failed from source: ${source_path} to local destination: ${rsync_destination}" "failure"
@@ -557,3 +585,4 @@ run_for_each_dataset() {
 #
 # Execute the main function to start the process
 run_for_each_dataset
+/mnt/user/appdata/duplicacy/scripts/notify_uptime_robot/notification.sh
