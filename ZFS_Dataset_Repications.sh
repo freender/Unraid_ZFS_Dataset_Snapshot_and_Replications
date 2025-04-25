@@ -26,7 +26,7 @@ source_dataset_auto_select_excludes=(
 	# List of dataset names to be excluded from auto-selection for snapshotting and replication
 	"excluded_dataset"
 )
-#
+
 ####################
 #
 #zfs snapshot settings
@@ -50,12 +50,13 @@ remote_server="10.10.20.197" #remote servers name or ip
 #
 ### replication settings
 #
-replication="rsync"   #this is set to the method for how you want to have the sourcedataset replicated - "zfs" , "rsync" or "none"
+replication="zfs"   #this is set to the method for how you want to have the sourcedataset replicated - "zfs" , "rsync" or "none"
 #
 ##########
 # zfs replication variables. You do NOT need these if replication set to "rsync" or "none"
 destination_pool="disk1"  #this is the zpool in which your destination dataset will be created
-parent_destination_dataset="zfs_backup" #this is the parent dataset in which a child dataset will be created containing the replicated data (zfs replication)
+parent_destination_dataset="backup" #this is the parent dataset in which a child dataset will be created containing the replicated data (zfs replication)
+child_destination_dataset="nas-docker" #works only if source_dataset_auto_select = no
 # For ZFS replication syncoid is used. The below variable sets some options for that.
 # "strict-mirror" Strict mirroring that both mirrors the source and repairs mismatches (uses --force-delete flag).This will delete snapshots in the destination which are not in the source.
 # "basic" Basic replication without any additional flags will not delete snapshots in destination if not in the source
@@ -505,7 +506,11 @@ update_paths() {
 
     source_dataset=$source_dataset_name
     source_path="$source_pool"/"$source_dataset"
-    zfs_destination_path="$destination_pool"/"$parent_destination_dataset"/"$source_pool"_"$source_dataset"
+    if [[ "$source_dataset_auto_select" == "no" ]]; then
+        zfs_destination_path="$destination_pool"/"$parent_destination_dataset"/"$child_destination_dataset"
+    else
+        zfs_destination_path="$destination_pool"/"$parent_destination_dataset"/"$source_pool"_"$source_dataset"
+    fi
     destination_rsync_location="$parent_destination_folder"/"$source_pool"_"$source_dataset"
     sanoid_config_complete_path="$sanoid_config_dir""$source_pool"_"$source_dataset"/
 }
