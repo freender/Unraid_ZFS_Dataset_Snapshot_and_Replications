@@ -509,7 +509,7 @@ update_paths() {
     if [[ "$source_dataset_auto_select" == "no" ]]; then
         zfs_destination_path="$destination_pool"/"$parent_destination_dataset"/"$child_destination_dataset"
     else
-        zfs_destination_path="$destination_pool"/"$parent_destination_dataset"/"$source_pool"_"$source_dataset"
+        zfs_destination_path="$destination_pool"/"$parent_destination_dataset"/"$source_dataset"
     fi
     destination_rsync_location="$parent_destination_folder"/"$source_pool"_"$source_dataset"
     sanoid_config_complete_path="$sanoid_config_dir""$source_pool"_"$source_dataset"/
